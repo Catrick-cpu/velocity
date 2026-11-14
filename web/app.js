@@ -270,7 +270,7 @@ function renderRoutes() {
         )
         .join("")}</div>
     </section>
-    <div class="notice-card"><strong>Map and terrain data</strong><p>The ride scene fetches a nearby five-by-five patch of SWISSIMAGE aerial tiles and three-by-three Mapzen Terrarium elevation tiles (EU-DEM, roughly 25–30 m source resolution) from public CORS-enabled services. Tile servers receive the requested map region; GPS tracks and ride data are not sent. Tiles are cached locally with a bounded 96-tile cache and reused offline when available. Demo courses are generated and are not mapped roads. Roads, buildings and vegetation appear only as pixels in the aerial imagery; they are not 3D map features. SwissALTI3D and detailed building/road data are not included. Unavailable regions use generated scenery.</p></div>`;
+    <div class="notice-card"><strong>Map and terrain data</strong><p>The ride scene fetches a five-by-five SWISSIMAGE base patch (2.5 m/pixel), a three-by-three 1 m/pixel detail patch around its center, and three-by-three Mapzen Terrarium elevation tiles (EU-DEM, roughly 25–30 m source resolution) from public CORS-enabled services. Tile servers receive the requested map region; GPS tracks and ride data are not sent. Tiles are cached locally with a bounded 96-tile cache and reused offline when available. Demo courses are generated and are not mapped roads. Roads, buildings and vegetation appear only as pixels in the aerial imagery; they are not 3D map features. SwissALTI3D and detailed building/road data are not included. Unavailable regions use generated scenery.</p></div>`;
 }
 
 function renderActivities() {

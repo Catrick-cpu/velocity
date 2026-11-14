@@ -18,6 +18,10 @@ test("Swiss-grid projection matches swisstopo coordinates in Grindelwald", () =>
     row: 290,
     col: 356,
   });
+  assert.deepEqual(swissImageTileAddress(46.626922694843884, 8.067, 25), {
+    row: 725,
+    col: 891,
+  });
 });
 
 test("Terrarium tiles use XYZ coordinates and decode signed elevations", () => {

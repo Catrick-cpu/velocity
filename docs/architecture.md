@@ -44,11 +44,12 @@ HTML asset references before the Pages artifact is uploaded.
 
 ## Data and rendering boundaries
 
-Browser rides load five-by-five regional SWISSIMAGE aerial tiles from the
-official swisstopo WMTS and three-by-three Mapzen Terrarium elevation tiles
-from the public AWS Open Data bucket. The selected WMTS tile matrix is 2.5 m
-per pixel; the European elevation source is EU-DEM at roughly 25–30 m native
-resolution, not swissALTI3D. Both services support browser CORS and need no key.
+Browser rides load a five-by-five 2.5 m/pixel SWISSIMAGE base patch and a
+three-by-three 1 m/pixel detail overlay around its center from the official
+swisstopo WMTS, plus three-by-three Mapzen Terrarium elevation tiles from the
+public AWS Open Data bucket. The European elevation source is EU-DEM at roughly
+25–30 m native resolution, not swissALTI3D. Both services support browser CORS
+and need no key.
 swisstopo's free-geodata terms permit reuse with attribution (`© swisstopo`);
 Mapzen's terrain-tile documentation requires attribution to Mapzen and its
 underlying sources, including Copernicus EU-DEM. See the [swisstopo terms](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices),

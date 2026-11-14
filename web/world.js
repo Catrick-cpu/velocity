@@ -79,6 +79,7 @@ export class WorldRenderer {
     this.routeCurve = null;
     this.routeSamples = [];
     this.route = null;
+    this.cameraInitialized = false;
     this.regionData = null;
     this.regionLoadKey = null;
     this.regionRequestToken = 0;
@@ -109,7 +110,7 @@ export class WorldRenderer {
       this.regionAbortController = null;
       this.regionLoadKey = null;
       this.failedRegionKeys.clear();
-      this.regionData?.texture?.dispose();
+      disposeRegionTextures(this.regionData);
       this.regionData = null;
     }
     this.buildWorld(route, projection.points);
@@ -120,6 +121,7 @@ export class WorldRenderer {
 
   buildWorld(route, projected) {
     this.clearWorld();
+    this.cameraInitialized = false;
     const curvePoints = projected.map(
       (point) => new THREE.Vector3(point.x, 0, point.z),
     );
@@ -174,16 +176,16 @@ export class WorldRenderer {
         },
       });
       if (token !== this.regionRequestToken || !this.route) {
-        region.texture?.dispose();
+        disposeRegionTextures(region);
         return;
       }
       const previousRegion = this.regionData;
       this.regionData = region;
       this.regionLoadKey = null;
       this.buildWorld(this.route, projectRoute(this.route.points).points);
-      previousRegion?.texture?.dispose();
+      disposeRegionTextures(previousRegion);
       this.onRegionStatus?.(
-        `SWISSIMAGE · EU-DEM ~30 m · ${region.cachedTileCount}/${region.tileCount} tiles cached`,
+        `${region.detailBounds ? "SWISSIMAGE 1 m + 2.5 m" : "SWISSIMAGE 2.5 m"} · EU-DEM ~30 m · ${region.cachedTileCount}/${region.tileCount} tiles cached`,
       );
     } catch (error) {
       if (token !== this.regionRequestToken || controller.signal.aborted)
@@ -338,9 +340,9 @@ export class WorldRenderer {
         riderState.tangent.x,
       );
       const cameraConfig = {
-        chase: [12, 6, 6, 2.4],
-        close: [6, 3.6, 3, 1.6],
-        hood: [1, 1.4, 3, 0],
+        chase: [12, 9, 5, 2.4],
+        close: [7, 6, 3, 1.6],
+        hood: [-0.45, 1.55, 13, 0],
         drone: [150, 125, 105, 0],
       }[cameraMode] ?? [8, 4.2, 3.5, 2.6];
       const direction = riderState.tangent;
@@ -353,8 +355,20 @@ export class WorldRenderer {
       const target = riderState.position
         .clone()
         .addScaledVector(direction, cameraConfig[2])
-        .add(new THREE.Vector3(0, 1.2, 0));
-      this.camera.position.lerp(cameraPosition, 1 - Math.exp(-delta * 5));
+        .add(new THREE.Vector3(0, cameraMode === "hood" ? 0.3 : 1.2, 0));
+      const clearance = cameraMode === "drone" ? 4 : 2.5;
+      this.keepAboveTerrain(
+        cameraPosition,
+        cameraMode === "hood" ? 1.6 : clearance,
+      );
+      this.keepAboveTerrain(target, cameraMode === "hood" ? 0.3 : 1);
+      this.rider.visible = cameraMode !== "hood";
+      if (this.cameraInitialized) {
+        this.camera.position.lerp(cameraPosition, 1 - Math.exp(-elapsed * 5));
+      } else {
+        this.camera.position.copy(cameraPosition);
+        this.cameraInitialized = true;
+      }
       this.camera.lookAt(target);
     }
 
@@ -368,6 +382,13 @@ export class WorldRenderer {
 
   onFps(callback) {
     this.onFrame = callback;
+  }
+
+  keepAboveTerrain(position, clearance) {
+    const terrain = this.heightAtWorld(position.x, position.z);
+    if (Number.isFinite(terrain)) {
+      position.y = Math.max(position.y, terrain + clearance);
+    }
   }
 
   resize() {
@@ -384,7 +405,7 @@ export class WorldRenderer {
     this.resizeObserver.disconnect();
     this.renderer.dispose();
     this.clearWorld();
-    this.regionData?.texture?.dispose();
+    disposeRegionTextures(this.regionData);
     this.terrainTexture.dispose();
     this.roadTexture.dispose();
     this.sky.material.dispose();
@@ -538,54 +559,61 @@ export class WorldRenderer {
   }
 
   buildSwissTerrain(region) {
-    const { minX, maxX, minZ, maxZ } = region.bounds;
-    const divisions =
-      this.preset === "Ultra Low" || this.preset === "Low" ? 96 : 160;
-    const vertices = [];
-    const uvs = [];
-    const indices = [];
-    for (let z = 0; z <= divisions; z += 1) {
-      const worldZ = minZ + ((maxZ - minZ) * z) / divisions;
-      for (let x = 0; x <= divisions; x += 1) {
-        const worldX = minX + ((maxX - minX) * x) / divisions;
-        vertices.push(worldX, this.heightAtWorld(worldX, worldZ), worldZ);
-        uvs.push(x / divisions, 1 - z / divisions);
-        if (x < divisions && z < divisions) {
-          const a = z * (divisions + 1) + x;
-          const b = a + divisions + 1;
-          indices.push(a, b, a + 1, b, b + 1, a + 1);
+    for (const layer of region.imageLayers) {
+      const { minX, maxX, minZ, maxZ } = layer.bounds;
+      const divisions =
+        this.preset === "Ultra Low" || this.preset === "Low" ? 96 : 160;
+      const vertices = [];
+      const uvs = [];
+      const indices = [];
+      for (let z = 0; z <= divisions; z += 1) {
+        const worldZ = minZ + ((maxZ - minZ) * z) / divisions;
+        for (let x = 0; x <= divisions; x += 1) {
+          const worldX = minX + ((maxX - minX) * x) / divisions;
+          const detailLift = layer.detail ? 0.12 : 0;
+          vertices.push(
+            worldX,
+            this.heightAtWorld(worldX, worldZ) + detailLift,
+            worldZ,
+          );
+          uvs.push(x / divisions, 1 - z / divisions);
+          if (x < divisions && z < divisions) {
+            const a = z * (divisions + 1) + x;
+            const b = a + divisions + 1;
+            indices.push(a, b, a + 1, b, b + 1, a + 1);
+          }
         }
       }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(vertices, 3),
+      );
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      if (!layer.texture) {
+        layer.texture = new THREE.CanvasTexture(layer.textureCanvas);
+        layer.texture.colorSpace = THREE.SRGBColorSpace;
+        layer.texture.anisotropy =
+          this.renderer.capabilities.getMaxAnisotropy();
+        layer.texture.generateMipmaps = true;
+        layer.texture.minFilter = THREE.LinearMipmapLinearFilter;
+        layer.texture.magFilter = THREE.LinearFilter;
+      }
+      const terrain = new THREE.Mesh(
+        geometry,
+        new THREE.MeshStandardMaterial({
+          map: layer.texture,
+          roughness: 1,
+          metalness: 0,
+        }),
+      );
+      terrain.renderOrder = layer.detail ? 1 : 0;
+      terrain.receiveShadow = true;
+      terrain.castShadow = false;
+      this.world.add(terrain);
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(vertices, 3),
-    );
-    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-    let texture = region.texture;
-    if (!texture) {
-      texture = new THREE.CanvasTexture(region.textureCanvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-      texture.generateMipmaps = true;
-      texture.minFilter = THREE.LinearMipmapLinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      region.texture = texture;
-    }
-    const terrain = new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({
-        map: texture,
-        roughness: 1,
-        metalness: 0,
-      }),
-    );
-    terrain.receiveShadow = true;
-    terrain.castShadow = false;
-    this.world.add(terrain);
   }
 
   buildRoad(samples, closed) {
@@ -906,6 +934,12 @@ export class WorldRenderer {
     houses.receiveShadow = true;
     roofs.castShadow = true;
     this.world.add(houses, roofs);
+  }
+}
+
+function disposeRegionTextures(region) {
+  for (const layer of region?.imageLayers ?? []) {
+    layer.texture?.dispose();
   }
 }
 

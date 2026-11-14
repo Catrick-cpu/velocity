@@ -1,5 +1,5 @@
 const SWISSTOPO_TILE_URL =
-  "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/21781/22";
+  "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/21781";
 const TERRARIUM_TILE_URL =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
 const CACHE_NAME = "velocity-geodata-v1";
@@ -7,11 +7,17 @@ const CACHE_LIMIT = 96;
 const CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 const TILE_SIZE = 256;
 const WMTS_ORIGIN = { easting: 420_000, northing: 350_000 };
-const WMTS_RESOLUTION = 8928.57142857143 * 0.00028;
-const WMTS_TILE_SPAN = WMTS_RESOLUTION * TILE_SIZE;
+const WMTS_RESOLUTIONS = new Map([
+  [22, 8928.57142857143 * 0.00028],
+  [23, 7142.857142857143 * 0.00028],
+  [24, 5357.142857142858 * 0.00028],
+  [25, 3571.4285714285716 * 0.00028],
+]);
 const TILE_CONCURRENCY = 4;
 const IMAGE_TILE_RADIUS = 2;
-const IMAGE_TILE_SIDE = IMAGE_TILE_RADIUS * 2 + 1;
+const IMAGE_TILE_MATRIX = 22;
+const DETAIL_TILE_RADIUS = 1;
+const DETAIL_TILE_MATRIX = 25;
 const ELEVATION_ZOOM = 14;
 const EARTH_RADIUS = 6_378_137;
 
@@ -36,13 +42,18 @@ export function swissGrid(lat, lon) {
   return { easting, northing };
 }
 
-export function swissImageTileAddress(lat, lon) {
+export function swissImageTileAddress(lat, lon, matrix = IMAGE_TILE_MATRIX) {
+  const resolution = WMTS_RESOLUTIONS.get(matrix);
+  if (!resolution) {
+    throw new RangeError(`Unsupported SWISSIMAGE tile matrix: ${matrix}`);
+  }
   const { easting, northing } = swissGrid(lat, lon);
   const lv03Easting = easting - 2_000_000;
   const lv03Northing = northing - 1_000_000;
+  const tileSpan = resolution * TILE_SIZE;
   return {
-    col: Math.floor((lv03Easting - WMTS_ORIGIN.easting) / WMTS_TILE_SPAN),
-    row: Math.floor((WMTS_ORIGIN.northing - lv03Northing) / WMTS_TILE_SPAN),
+    col: Math.floor((lv03Easting - WMTS_ORIGIN.easting) / tileSpan),
+    row: Math.floor((WMTS_ORIGIN.northing - lv03Northing) / tileSpan),
   };
 }
 
@@ -89,6 +100,11 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
   }
 
   const imageCenter = swissImageTileAddress(center.lat, center.lon);
+  const detailCenter = swissImageTileAddress(
+    center.lat,
+    center.lon,
+    DETAIL_TILE_MATRIX,
+  );
   const elevationCenter = terrariumTileAddress(
     center.lat,
     center.lon,
@@ -99,93 +115,127 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
     imageCenter.row,
     IMAGE_TILE_RADIUS,
   );
+  const detailTiles = tilesAround(
+    detailCenter.col,
+    detailCenter.row,
+    DETAIL_TILE_RADIUS,
+  );
   const elevationTiles = tilesAround(elevationCenter.x, elevationCenter.y);
   const jobs = [
-    ...imageTiles.map((tile) => ({ kind: "image", tile })),
+    ...imageTiles.map((tile) => ({
+      kind: "image",
+      matrix: IMAGE_TILE_MATRIX,
+      tile,
+    })),
+    ...detailTiles.map((tile) => ({
+      kind: "detail",
+      matrix: DETAIL_TILE_MATRIX,
+      tile,
+    })),
     ...elevationTiles.map((tile) => ({ kind: "elevation", tile })),
   ];
   let completed = 0;
+  let detailError = null;
   const loaded = await mapConcurrent(jobs, TILE_CONCURRENCY, async (job) => {
-    if (job.kind === "image") {
-      const url = `${SWISSTOPO_TILE_URL}/${job.tile.row}/${job.tile.col}.jpeg`;
+    try {
+      if (job.kind === "image" || job.kind === "detail") {
+        const url = `${SWISSTOPO_TILE_URL}/${job.matrix}/${job.tile.row}/${job.tile.col}.jpeg`;
+        const response = await fetchTile(url, signal);
+        const tile = {
+          kind: job.kind,
+          tile: job.tile,
+          bitmap: await globalThis.createImageBitmap(response.blob),
+          fromCache: response.fromCache,
+        };
+        completed += 1;
+        onProgress?.(completed, jobs.length);
+        return tile;
+      }
+
+      const url = `${TERRARIUM_TILE_URL}/${ELEVATION_ZOOM}/${job.tile.x}/${job.tile.y}.png`;
       const response = await fetchTile(url, signal);
+      const bitmap = await globalThis.createImageBitmap(response.blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = TILE_SIZE;
+      canvas.height = TILE_SIZE;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        bitmap.close();
+        throw new Error(
+          "Canvas pixel access is unavailable for elevation data.",
+        );
+      }
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
       const tile = {
-        kind: "image",
+        kind: "elevation",
         tile: job.tile,
-        bitmap: await globalThis.createImageBitmap(response.blob),
+        pixels: context.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data,
+        source: response.headers.get("x-amz-meta-x-imagery-sources"),
         fromCache: response.fromCache,
       };
       completed += 1;
       onProgress?.(completed, jobs.length);
       return tile;
+    } catch (error) {
+      if (job.kind !== "detail" || signal?.aborted) throw error;
+      detailError ??= error;
+      completed += 1;
+      onProgress?.(completed, jobs.length);
+      return null;
     }
-
-    const url = `${TERRARIUM_TILE_URL}/${ELEVATION_ZOOM}/${job.tile.x}/${job.tile.y}.png`;
-    const response = await fetchTile(url, signal);
-    const bitmap = await globalThis.createImageBitmap(response.blob);
-    const canvas = document.createElement("canvas");
-    canvas.width = TILE_SIZE;
-    canvas.height = TILE_SIZE;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) {
-      bitmap.close();
-      throw new Error("Canvas pixel access is unavailable for elevation data.");
-    }
-    context.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    const tile = {
-      kind: "elevation",
-      tile: job.tile,
-      pixels: context.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data,
-      source: response.headers.get("x-amz-meta-x-imagery-sources"),
-      fromCache: response.fromCache,
-    };
-    completed += 1;
-    onProgress?.(completed, jobs.length);
-    return tile;
   });
 
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE * IMAGE_TILE_SIDE;
-  canvas.height = TILE_SIZE * IMAGE_TILE_SIDE;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    loaded
-      .filter((tile) => tile.kind === "image")
-      .forEach((tile) => tile.bitmap.close());
-    throw new Error("Canvas rendering is unavailable for Swiss map tiles.");
-  }
-
-  const images = loaded.filter((tile) => tile.kind === "image");
-  for (const tile of images) {
-    context.drawImage(
-      tile.bitmap,
-      (tile.tile.col - imageCenter.col + IMAGE_TILE_RADIUS) * TILE_SIZE,
-      (tile.tile.row - imageCenter.row + IMAGE_TILE_RADIUS) * TILE_SIZE,
+  const loadedTiles = loaded.filter(Boolean);
+  const originGrid = swissGrid(origin.lat, origin.lon);
+  const imageLayers = [];
+  try {
+    imageLayers.push(
+      createImageLayer(
+        loadedTiles.filter((tile) => tile.kind === "image"),
+        imageCenter,
+        originGrid,
+        IMAGE_TILE_MATRIX,
+        IMAGE_TILE_RADIUS,
+      ),
     );
-    tile.bitmap.close();
+    const loadedDetailTiles = loadedTiles.filter(
+      (tile) => tile.kind === "detail",
+    );
+    if (
+      !detailError &&
+      loadedDetailTiles.length === (DETAIL_TILE_RADIUS * 2 + 1) ** 2
+    ) {
+      imageLayers.push(
+        createImageLayer(
+          loadedDetailTiles,
+          detailCenter,
+          originGrid,
+          DETAIL_TILE_MATRIX,
+          DETAIL_TILE_RADIUS,
+        ),
+      );
+    } else {
+      closeImageTiles(loadedDetailTiles);
+    }
+  } catch (error) {
+    closeImageTiles(loadedTiles);
+    throw error;
+  }
+  if (detailError) {
+    console.warn(
+      "High-resolution SWISSIMAGE tiles are unavailable; using the regional base imagery.",
+      detailError,
+    );
   }
 
   const elevationData = new Map(
-    loaded
+    loadedTiles
       .filter((tile) => tile.kind === "elevation")
       .map((tile) => [`${tile.tile.x}/${tile.tile.y}`, tile.pixels]),
   );
-  const originGrid = swissGrid(origin.lat, origin.lon);
-  const minCol = imageCenter.col - IMAGE_TILE_RADIUS;
-  const minRow = imageCenter.row - IMAGE_TILE_RADIUS;
-  const minEasting = WMTS_ORIGIN.easting + minCol * WMTS_TILE_SPAN + 2_000_000;
-  const maxEasting = minEasting + TILE_SIZE * IMAGE_TILE_SIDE * WMTS_RESOLUTION;
-  const maxNorthing =
-    WMTS_ORIGIN.northing - minRow * WMTS_TILE_SPAN + 1_000_000;
-  const minNorthing =
-    maxNorthing - TILE_SIZE * IMAGE_TILE_SIDE * WMTS_RESOLUTION;
-  const bounds = {
-    minX: minEasting - originGrid.easting,
-    maxX: maxEasting - originGrid.easting,
-    minZ: originGrid.northing - maxNorthing,
-    maxZ: originGrid.northing - minNorthing,
-  };
+  const bounds = imageLayers[0].bounds;
+  const detailLayer = imageLayers[1] ?? null;
   const terrainBounds = getTerrainBounds(
     elevationCenter,
     origin,
@@ -208,8 +258,9 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
   return {
     key: `${imageCenter.row}/${imageCenter.col}`,
     bounds,
+    detailBounds: detailLayer?.bounds ?? null,
     terrainBounds,
-    textureCanvas: canvas,
+    imageLayers,
     heightAtGeo,
     heightAtWorld,
     referenceElevation,
@@ -218,16 +269,62 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
       x <= bounds.maxX &&
       z >= bounds.minZ &&
       z <= bounds.maxZ,
-    tileCount: loaded.length,
-    cachedTileCount: loaded.filter((tile) => tile.fromCache).length,
+    tileCount: jobs.length,
+    cachedTileCount: loadedTiles.filter((tile) => tile.fromCache).length,
     source: [
       ...new Set(
-        loaded
+        loadedTiles
           .filter((tile) => tile.kind === "elevation" && tile.source)
           .flatMap((tile) => tile.source.split(",").map((item) => item.trim())),
       ),
     ],
   };
+}
+
+function createImageLayer(tiles, center, origin, matrix, radius) {
+  const side = radius * 2 + 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE * side;
+  canvas.height = TILE_SIZE * side;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    closeImageTiles(tiles);
+    throw new Error("Canvas rendering is unavailable for Swiss map tiles.");
+  }
+  for (const tile of tiles) {
+    context.drawImage(
+      tile.bitmap,
+      (tile.tile.col - center.col + radius) * TILE_SIZE,
+      (tile.tile.row - center.row + radius) * TILE_SIZE,
+    );
+    tile.bitmap.close();
+  }
+
+  const resolution = WMTS_RESOLUTIONS.get(matrix);
+  if (!resolution) {
+    throw new RangeError(`Unsupported SWISSIMAGE tile matrix: ${matrix}`);
+  }
+  const tileSpan = resolution * TILE_SIZE;
+  const minCol = center.col - radius;
+  const minRow = center.row - radius;
+  const minEasting = WMTS_ORIGIN.easting + minCol * tileSpan + 2_000_000;
+  const maxEasting = minEasting + TILE_SIZE * side * resolution;
+  const maxNorthing = WMTS_ORIGIN.northing - minRow * tileSpan + 1_000_000;
+  const minNorthing = maxNorthing - TILE_SIZE * side * resolution;
+  return {
+    detail: matrix === DETAIL_TILE_MATRIX,
+    bounds: {
+      minX: minEasting - origin.easting,
+      maxX: maxEasting - origin.easting,
+      minZ: origin.northing - maxNorthing,
+      maxZ: origin.northing - minNorthing,
+    },
+    textureCanvas: canvas,
+  };
+}
+
+function closeImageTiles(tiles) {
+  tiles.filter((tile) => tile.bitmap).forEach((tile) => tile.bitmap.close());
 }
 
 function getTerrainBounds(center, origin, zoom) {
@@ -380,7 +477,7 @@ async function mapConcurrent(items, limit, worker) {
   const failure = workers.find((result) => result.status === "rejected");
   if (failure) {
     results
-      .filter((tile) => tile?.kind === "image")
+      .filter((tile) => tile?.kind === "image" || tile?.kind === "detail")
       .forEach((tile) => tile.bitmap.close());
     throw failure.reason;
   }
