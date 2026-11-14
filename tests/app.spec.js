@@ -28,8 +28,9 @@ test("ride starts in a real WebGL2 scene and records a local simulated activity"
   page,
 }) => {
   const errors = [];
-  await page.route(/wmts\.geo\.admin\.ch|elevation-tiles-prod/, (route) =>
-    route.abort(),
+  await page.route(
+    /wmts\.geo\.admin\.ch|elevation-tiles-prod|tiles\.openfreemap\.org/,
+    (route) => route.abort(),
   );
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("./#/ride");

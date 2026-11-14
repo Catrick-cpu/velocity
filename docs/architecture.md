@@ -44,17 +44,32 @@ HTML asset references before the Pages artifact is uploaded.
 
 ## Data and rendering boundaries
 
-Browser rides load a five-by-five 2.5 m/pixel SWISSIMAGE base patch and a
-three-by-three 1 m/pixel detail overlay around its center from the official
-swisstopo WMTS, plus three-by-three Mapzen Terrarium elevation tiles from the
-public AWS Open Data bucket. The European elevation source is EU-DEM at roughly
-25–30 m native resolution, not swissALTI3D. Both services support browser CORS
-and need no key.
+Browser rides load a five-by-five 2.5 m/pixel SWISSIMAGE base patch, a
+three-by-three 1 m/pixel detail layer and a three-by-three 0.25 m/pixel
+close-range overlay from the official swisstopo WMTS. A nearby three-by-three
+SwissALTI3D multidirectional hillshade patch is blended lightly into the detail
+imagery; the actual elevation mesh still uses three-by-three Mapzen Terrarium
+tiles from the public AWS Open Data bucket, based on EU-DEM at roughly 25–30 m
+native resolution. The hillshade adds surface relief but is not a replacement
+for high-resolution elevation data.
+
+The scene also requests nearby zoom-14 building vector tiles from OpenFreeMap's
+public OpenMapTiles service. Building outlines and approximate render heights
+are derived from OpenStreetMap and extruded locally; untagged/unknown building
+heights use a conservative fallback. It uses no key and supports browser CORS.
+OpenFreeMap and OpenMapTiles are community-hosted services, so building data
+may be incomplete or temporarily unavailable. The map cache remains bounded to
+96 requests and the scene degrades to imagery when optional detail or building
+sources fail.
+
 swisstopo's free-geodata terms permit reuse with attribution (`© swisstopo`);
 Mapzen's terrain-tile documentation requires attribution to Mapzen and its
 underlying sources, including Copernicus EU-DEM. See the [swisstopo terms](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices),
 [Mapzen attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)
 and [Mapzen data sources](https://github.com/tilezen/joerd/blob/master/docs/data-sources.md).
+OpenFreeMap uses [OpenMapTiles](https://openfreemap.org/quick_start/) and
+[OpenStreetMap contributors](https://www.openstreetmap.org/copyright), whose
+ODbL attribution is included in the ride scene.
 
 The tile cache is capped at 96 entries and prunes the oldest cached requests.
 It prefers cached tiles for 30 days, then refreshes online and uses the prior
@@ -64,17 +79,18 @@ loaded patch; unavailable or out-of-coverage areas retain generated scenery
 with an explicit status.
 
 The browser demo routes remain generated loops rather than surveyed roads.
-The loaded imagery and terrain are real, but roads, buildings and vegetation
-are only visible as pixels, not as vector or 3D features, and the 25–30 m
-EU-DEM cannot reproduce SwissALTI3D's sub-meter terrain or buildings. Imported
-GPX/TCX coordinates are preserved. Areas without loaded regional data use
-generated scenery. Native elevation support remains independent of the browser
-renderer.
+The loaded imagery is real, while 3D buildings are generalized OpenStreetMap
+footprints rather than cadastral SwissBUILDINGS3D models. Roads and vegetation
+remain imagery-only, and the 25–30 m EU-DEM cannot reproduce SwissALTI3D's
+sub-meter terrain. Imported GPX/TCX coordinates are preserved. Areas without
+loaded regional data use generated scenery. Native elevation support remains
+independent of the browser renderer.
 
 Static hosting has no server-side database, computation or upload endpoint.
-Large geodata packs are intentionally not bundled. GeoAdmin's public geoservice
-is best-effort and may limit excessive traffic; the app requests only nearby
-tiles with four concurrent requests and does not retry failed requests.
+Large geodata packs are intentionally not bundled. GeoAdmin and OpenFreeMap are
+best-effort public services and may limit excessive traffic; the app requests
+only nearby tiles with four concurrent requests and does not retry failed
+requests.
 
 ## Local development and checks
 

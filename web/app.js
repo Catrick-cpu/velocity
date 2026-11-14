@@ -223,7 +223,7 @@ function renderRide() {
           <div class="hud-stats"><span><strong id="power">0</strong><small>${powerLabel}</small></span><span><strong id="cadence">0</strong><small>SIM RPM</small></span><span><strong id="heart-rate">--</strong><small>${heartRateLabel}</small></span></div>
           <div class="distance-readout"><strong id="distance">0.00</strong><span>KM</span><small id="elapsed">00:00:00</small></div>
         </div>
-        <div class="world-caption"><span id="world-data-status" role="status" aria-live="polite">Swiss regional data loads on demand</span><span class="world-attribution">Aerial imagery <a href="https://www.swisstopo.admin.ch/en/home.html" target="_blank" rel="noopener noreferrer">© swisstopo</a> · Elevation <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener noreferrer">Mapzen / Copernicus EU-DEM</a></span></div>
+        <div class="world-caption"><span id="world-data-status" role="status" aria-live="polite">Swiss regional data loads on demand</span><span class="world-attribution"><a href="https://www.swisstopo.admin.ch/en/home.html" target="_blank" rel="noopener noreferrer">© swisstopo · SwissALTI3D</a> · <a href="https://openfreemap.org/quick_start/" target="_blank" rel="noopener noreferrer">© OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a> · <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener noreferrer">Mapzen / Copernicus EU-DEM</a></span></div>
       </div>
       <aside class="ride-side">
         <div class="ride-controls">
@@ -270,7 +270,7 @@ function renderRoutes() {
         )
         .join("")}</div>
     </section>
-    <div class="notice-card"><strong>Map and terrain data</strong><p>The ride scene fetches a five-by-five SWISSIMAGE base patch (2.5 m/pixel), a three-by-three 1 m/pixel detail patch around its center, and three-by-three Mapzen Terrarium elevation tiles (EU-DEM, roughly 25–30 m source resolution) from public CORS-enabled services. Tile servers receive the requested map region; GPS tracks and ride data are not sent. Tiles are cached locally with a bounded 96-tile cache and reused offline when available. Demo courses are generated and are not mapped roads. Roads, buildings and vegetation appear only as pixels in the aerial imagery; they are not 3D map features. SwissALTI3D and detailed building/road data are not included. Unavailable regions use generated scenery.</p></div>`;
+    <div class="notice-card"><strong>Map and terrain data</strong><p>The ride scene loads 2.5 m/pixel SWISSIMAGE imagery, a 1 m detail layer and a 0.25 m/pixel close-range patch, plus a SwissALTI3D hillshade texture. Elevation still comes from EU-DEM at roughly 25–30 m source resolution. Nearby OpenFreeMap/OpenMapTiles data derived from OpenStreetMap provides approximate 3D building footprints and heights; attribution is shown in the scene. The map services receive the requested area, but GPS tracks and ride data are not uploaded. Data is cached locally with a bounded 96-tile cache. Demo courses are generated, not mapped roads, and roads/vegetation are not 3D features. External data can be unavailable or incomplete; the ride remains playable with imagery or generated scenery.</p></div>`;
 }
 
 function renderActivities() {

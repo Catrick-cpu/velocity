@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Sky } from "three/addons/objects/Sky.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { routeLength } from "./model.js";
 import {
   blendRegionalTerrainHeight,
@@ -55,7 +56,9 @@ export class WorldRenderer {
     this.cloudLayer.add(this.clouds);
     this.hemiLight = new THREE.HemisphereLight("#e8f4ff", "#4b5c42", 1.8);
     this.sun = new THREE.DirectionalLight("#fff0d3", 3.4);
+    this.sunDirection = new THREE.Vector3();
     this.sun.position.set(-450, 850, 300);
+    this.scene.add(this.sun.target);
     this.scene.add(this.hemiLight, this.sun);
     this.sunDisc = new THREE.Mesh(
       new THREE.SphereGeometry(34, 20, 16),
@@ -87,6 +90,9 @@ export class WorldRenderer {
     this.failedRegionKeys = new Set();
     this.projectionOrigin = null;
     this.rider = createRider();
+    this.riderWheels = this.rider.children.filter(
+      (child) => child.userData.rollingWheel,
+    );
     this.scene.add(this.rider);
     this.preset = "Auto";
     this.elapsed = 0;
@@ -144,6 +150,9 @@ export class WorldRenderer {
     if (this.regionData) {
       this.buildSwissLandform(this.regionData);
       this.buildSwissTerrain(this.regionData);
+      this.regionData.renderedBuildingCount = this.buildSwissBuildings(
+        this.regionData,
+      );
     } else {
       this.buildMountains(this.routeSamples);
       this.buildRoad(this.routeSamples, closed);
@@ -184,8 +193,13 @@ export class WorldRenderer {
       this.regionLoadKey = null;
       this.buildWorld(this.route, projectRoute(this.route.points).points);
       disposeRegionTextures(previousRegion);
+      const imagery = region.imageLayers.some((layer) => layer.matrix === 27)
+        ? "SWISSIMAGE 25 cm + 1 m + 2.5 m"
+        : region.imageLayers.some((layer) => layer.matrix === 25)
+          ? "SWISSIMAGE 1 m + 2.5 m"
+          : "SWISSIMAGE 2.5 m";
       this.onRegionStatus?.(
-        `${region.detailBounds ? "SWISSIMAGE 1 m + 2.5 m" : "SWISSIMAGE 2.5 m"} · EU-DEM ~30 m · ${region.cachedTileCount}/${region.tileCount} tiles cached`,
+        `${imagery} · ${region.renderedBuildingCount ?? 0} 3D buildings · EU-DEM ~30 m · ${region.cachedTileCount}/${region.tileCount} tiles cached`,
       );
     } catch (error) {
       if (token !== this.regionRequestToken || controller.signal.aborted)
@@ -293,6 +307,7 @@ export class WorldRenderer {
     this.scene.fog.near = 450 + (100 - fog) * 9;
     this.scene.fog.far = Math.max(this.scene.fog.near + 250, 5700 - fog * 33);
     this.sky.material.uniforms.sunPosition.value.copy(sunDirection);
+    this.sunDirection.copy(sunDirection);
     this.sun.position.copy(sunDirection).multiplyScalar(900);
     this.sunDisc.position.copy(sunDirection).multiplyScalar(7600);
     this.sunDisc.visible = daylight > 0.04;
@@ -339,6 +354,10 @@ export class WorldRenderer {
         -riderState.tangent.z,
         riderState.tangent.x,
       );
+      const wheelSpin = -distanceM / (0.37 * 1.5);
+      this.riderWheels.forEach((wheel) => {
+        wheel.rotation.z = wheelSpin;
+      });
       const cameraConfig = {
         chase: [12, 9, 5, 2.4],
         close: [7, 6, 3, 1.6],
@@ -362,6 +381,11 @@ export class WorldRenderer {
         cameraMode === "hood" ? 1.6 : clearance,
       );
       this.keepAboveTerrain(target, cameraMode === "hood" ? 0.3 : 1);
+      if (cameraMode !== "hood" && cameraMode !== "drone") {
+        raiseCameraAboveTerrain(cameraPosition, target, (x, z) =>
+          this.heightAtWorld(x, z),
+        );
+      }
       this.rider.visible = cameraMode !== "hood";
       if (this.cameraInitialized) {
         this.camera.position.lerp(cameraPosition, 1 - Math.exp(-elapsed * 5));
@@ -370,6 +394,7 @@ export class WorldRenderer {
         this.cameraInitialized = true;
       }
       this.camera.lookAt(target);
+      this.updateSunTarget(riderState.position, cameraMode);
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -389,6 +414,32 @@ export class WorldRenderer {
     if (Number.isFinite(terrain)) {
       position.y = Math.max(position.y, terrain + clearance);
     }
+  }
+
+  updateSunTarget(position, cameraMode) {
+    const shadowRadius =
+      {
+        chase: 170,
+        close: 110,
+        hood: 110,
+        drone: 750,
+      }[cameraMode] ?? 170;
+    this.sun.target.position.set(position.x, 0, position.z);
+    this.sun.position
+      .copy(this.sun.target.position)
+      .addScaledVector(this.sunDirection, 900);
+    const shadowCamera = this.sun.shadow.camera;
+    if (this.shadowRadius !== shadowRadius) {
+      this.shadowRadius = shadowRadius;
+      shadowCamera.left = -shadowRadius;
+      shadowCamera.right = shadowRadius;
+      shadowCamera.top = shadowRadius;
+      shadowCamera.bottom = -shadowRadius;
+      shadowCamera.near = 0.1;
+      shadowCamera.far = 1800;
+      shadowCamera.updateProjectionMatrix();
+    }
+    this.sun.target.updateMatrixWorld();
   }
 
   resize() {
@@ -561,6 +612,9 @@ export class WorldRenderer {
   buildSwissTerrain(region) {
     for (const layer of region.imageLayers) {
       const { minX, maxX, minZ, maxZ } = layer.bounds;
+      const higherResolutionLayers = region.imageLayers.filter(
+        (candidate) => candidate.matrix > layer.matrix,
+      );
       const divisions =
         this.preset === "Ultra Low" || this.preset === "Low" ? 96 : 160;
       const vertices = [];
@@ -570,7 +624,7 @@ export class WorldRenderer {
         const worldZ = minZ + ((maxZ - minZ) * z) / divisions;
         for (let x = 0; x <= divisions; x += 1) {
           const worldX = minX + ((maxX - minX) * x) / divisions;
-          const detailLift = layer.detail ? 0.12 : 0;
+          const detailLift = layer.lift;
           vertices.push(
             worldX,
             this.heightAtWorld(worldX, worldZ) + detailLift,
@@ -578,8 +632,22 @@ export class WorldRenderer {
           );
           uvs.push(x / divisions, 1 - z / divisions);
           if (x < divisions && z < divisions) {
+            const nextWorldX = minX + ((maxX - minX) * (x + 1)) / divisions;
+            const nextWorldZ = minZ + ((maxZ - minZ) * (z + 1)) / divisions;
             const a = z * (divisions + 1) + x;
             const b = a + divisions + 1;
+            const coveredByHigherResolutionLayer = higherResolutionLayers.some(
+              (candidate) => {
+                const bounds = candidate.bounds;
+                return (
+                  worldX >= bounds.minX &&
+                  nextWorldX <= bounds.maxX &&
+                  worldZ >= bounds.minZ &&
+                  nextWorldZ <= bounds.maxZ
+                );
+              },
+            );
+            if (coveredByHigherResolutionLayer) continue;
             indices.push(a, b, a + 1, b, b + 1, a + 1);
           }
         }
@@ -609,11 +677,158 @@ export class WorldRenderer {
           metalness: 0,
         }),
       );
-      terrain.renderOrder = layer.detail ? 1 : 0;
+      terrain.renderOrder = layer.matrix;
       terrain.receiveShadow = true;
       terrain.castShadow = false;
       this.world.add(terrain);
     }
+  }
+
+  buildSwissBuildings(region) {
+    const baseLayer = region.imageLayers[0];
+    if (!baseLayer?.texture || !region.buildings?.length) return 0;
+    const { minX, maxX, minZ, maxZ } = baseLayer.bounds;
+    const wallPositions = [];
+    const wallColors = [];
+    const roofGeometries = [];
+    const wallPalette = [
+      "#d8d0c3",
+      "#c7b9a2",
+      "#e1dbd0",
+      "#bcae96",
+      "#d2c2a8",
+    ].map((color) => new THREE.Color(color));
+    let rendered = 0;
+    for (const building of region.buildings) {
+      const footprint = building.footprint;
+      if (footprint.length < 3) continue;
+      const centerX =
+        footprint.reduce((sum, point) => sum + point.x, 0) / footprint.length;
+      const centerZ =
+        footprint.reduce((sum, point) => sum + point.z, 0) / footprint.length;
+      if (
+        centerX < minX ||
+        centerX > maxX ||
+        centerZ < minZ ||
+        centerZ > maxZ
+      ) {
+        continue;
+      }
+      const polygonArea = Math.abs(signedArea(footprint));
+      if (polygonArea < 5 || polygonArea > 20_000) continue;
+      const rings = [footprint, ...(building.holes ?? [])];
+      const terrainHeights = footprint.map((point) =>
+        this.heightAtWorld(point.x, point.z),
+      );
+      const baseHeight =
+        terrainHeights.reduce((sum, height) => sum + height, 0) /
+        terrainHeights.length;
+      const roofHeight = baseHeight + building.height;
+      const wallColor = /^#[\da-f]{6}$/i.test(building.color ?? "")
+        ? new THREE.Color(building.color)
+        : wallPalette[rendered % wallPalette.length];
+      const roofShape = createBuildingShape(footprint, building.holes);
+      const roof = new THREE.ShapeGeometry(roofShape);
+      roof.rotateX(-Math.PI / 2);
+      roof.translate(0, roofHeight, 0);
+      const roofPositions = roof.getAttribute("position");
+      const roofUvs = new Float32Array(roofPositions.count * 2);
+      for (let vertex = 0; vertex < roofPositions.count; vertex += 1) {
+        const x = roofPositions.getX(vertex);
+        const z = roofPositions.getZ(vertex);
+        roofUvs[vertex * 2] = THREE.MathUtils.clamp(
+          (x - minX) / (maxX - minX),
+          0,
+          1,
+        );
+        roofUvs[vertex * 2 + 1] = THREE.MathUtils.clamp(
+          1 - (z - minZ) / (maxZ - minZ),
+          0,
+          1,
+        );
+      }
+      roof.setAttribute("uv", new THREE.BufferAttribute(roofUvs, 2));
+      roofGeometries.push(roof);
+
+      for (const ring of rings) {
+        for (let index = 0; index < ring.length; index += 1) {
+          const start = ring[index];
+          const end = ring[(index + 1) % ring.length];
+          const startGround = this.heightAtWorld(start.x, start.z);
+          const endGround = this.heightAtWorld(end.x, end.z);
+          const lowerStart = startGround + building.minHeight;
+          const lowerEnd = endGround + building.minHeight;
+          const vertices = [
+            start.x,
+            lowerStart,
+            start.z,
+            end.x,
+            lowerEnd,
+            end.z,
+            start.x,
+            roofHeight,
+            start.z,
+            end.x,
+            lowerEnd,
+            end.z,
+            end.x,
+            roofHeight,
+            end.z,
+            start.x,
+            roofHeight,
+            start.z,
+          ];
+          wallPositions.push(...vertices);
+          for (let vertex = 0; vertex < 6; vertex += 1) {
+            wallColors.push(wallColor.r, wallColor.g, wallColor.b);
+          }
+        }
+      }
+      rendered += 1;
+    }
+
+    if (wallPositions.length) {
+      const wallsGeometry = new THREE.BufferGeometry();
+      wallsGeometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(wallPositions, 3),
+      );
+      wallsGeometry.setAttribute(
+        "color",
+        new THREE.Float32BufferAttribute(wallColors, 3),
+      );
+      wallsGeometry.computeVertexNormals();
+      const walls = new THREE.Mesh(
+        wallsGeometry,
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.92,
+          side: THREE.DoubleSide,
+        }),
+      );
+      walls.castShadow = true;
+      walls.receiveShadow = true;
+      this.world.add(walls);
+    }
+
+    if (roofGeometries.length) {
+      const roofGeometry = mergeGeometries(roofGeometries, false);
+      roofGeometries.forEach((geometry) => geometry.dispose());
+      if (roofGeometry) {
+        const roofs = new THREE.Mesh(
+          roofGeometry,
+          new THREE.MeshStandardMaterial({
+            map: baseLayer.texture,
+            roughness: 0.88,
+            side: THREE.DoubleSide,
+          }),
+        );
+        roofs.castShadow = true;
+        roofs.receiveShadow = true;
+        this.world.add(roofs);
+      }
+    }
+    return rendered;
   }
 
   buildRoad(samples, closed) {
@@ -1189,12 +1404,43 @@ function nearestRouteDistance(x, z, samples) {
   return minimum;
 }
 
+function signedArea(ring) {
+  let area = 0;
+  for (let index = 0; index < ring.length; index += 1) {
+    const current = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    area += current.x * next.z - next.x * current.z;
+  }
+  return area / 2;
+}
+
+function createBuildingShape(outer, holes = []) {
+  const shape = new THREE.Shape();
+  addShapeRing(shape, outer);
+  for (const ring of holes) {
+    const hole = new THREE.Path();
+    addShapeRing(hole, ring);
+    shape.holes.push(hole);
+  }
+  return shape;
+}
+
+function addShapeRing(path, ring) {
+  const points = ring.map((point) => new THREE.Vector2(point.x, -point.z));
+  if (!THREE.ShapeUtils.isClockWise(points)) points.reverse();
+  points.forEach((point, index) => {
+    if (index === 0) path.moveTo(point.x, point.y);
+    else path.lineTo(point.x, point.y);
+  });
+  path.closePath();
+}
+
 function pseudoRandom(seed) {
   const value = Math.sin(seed * 78.233) * 43_758.5453;
   return value - Math.floor(value);
 }
 
-function createRider() {
+export function createRider() {
   const group = new THREE.Group();
   const frame = new THREE.MeshStandardMaterial({
     color: "#4bc5a4",
@@ -1244,10 +1490,11 @@ function createRider() {
     new THREE.TorusGeometry(0.37, 0.035, 8, 24),
     dark,
   );
-  wheel.rotation.y = Math.PI / 2;
+  wheel.userData.rollingWheel = true;
   wheel.position.copy(rear);
   group.add(wheel);
   const frontWheel = wheel.clone();
+  frontWheel.userData.rollingWheel = true;
   frontWheel.position.copy(front);
   group.add(frontWheel);
 
@@ -1280,6 +1527,28 @@ function createRider() {
   group.scale.setScalar(1.5);
   group.castShadow = true;
   return group;
+}
+
+export function raiseCameraAboveTerrain(
+  cameraPosition,
+  target,
+  heightAtWorld,
+  clearance = 1.25,
+) {
+  for (let step = 1; step <= 8; step += 1) {
+    const progress = step / 10;
+    const x = THREE.MathUtils.lerp(cameraPosition.x, target.x, progress);
+    const z = THREE.MathUtils.lerp(cameraPosition.z, target.z, progress);
+    const terrain = heightAtWorld(x, z);
+    if (!Number.isFinite(terrain)) continue;
+    const viewHeight = THREE.MathUtils.lerp(
+      cameraPosition.y,
+      target.y,
+      progress,
+    );
+    const deficit = terrain + clearance - viewHeight;
+    if (deficit > 0) cameraPosition.y += deficit / (1 - progress);
+  }
 }
 
 function addCylinderBetween(group, from, to, material, radius) {
