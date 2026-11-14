@@ -17,10 +17,17 @@ Thanks for helping improve VELOCITY.
    ```
 2. Run checks/tests before submitting changes:
    ```bash
-   cargo check -p velocity-app
-   cargo test -p velocity-core -p velocity-app
+   cargo fmt --all -- --check
+   cargo test --locked --workspace
+   npm ci
+   npm run format:check
+   npm run lint
+   npm test
+   npm run build
+   npm run check:build
    ```
-3. For rendering/world changes, verify visuals in-app (and capture screenshots when useful) and note performance impact.
+3. For browser rendering changes, run `npx playwright install chromium` and `npm run test:e2e`; verify the live scene and note measured performance and browser/GPU.
+4. For native rendering/world changes, verify visuals in-app and note performance impact.
 
 ## Pull requests
 

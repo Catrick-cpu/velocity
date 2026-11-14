@@ -1,0 +1,60 @@
+import js from "@eslint/js";
+
+export default [
+  {
+    ignores: ["dist/**", "node_modules/**", "web/public/**"],
+  },
+  js.configs.recommended,
+  {
+    files: [
+      "web/**/*.js",
+      "tests/**/*.js",
+      "scripts/*.mjs",
+      "scripts/**/*.mjs",
+      "*.js",
+    ],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...js.configs.recommended.languageOptions?.globals,
+        window: "readonly",
+        document: "readonly",
+        location: "readonly",
+        navigator: "readonly",
+        performance: "readonly",
+        requestAnimationFrame: "readonly",
+        cancelAnimationFrame: "readonly",
+        ResizeObserver: "readonly",
+        DOMParser: "readonly",
+        Blob: "readonly",
+        URL: "readonly",
+        localStorage: "readonly",
+        indexedDB: "readonly",
+        crypto: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        console: "readonly",
+        process: "readonly",
+        Buffer: "readonly",
+        FileReader: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
+        HTMLElement: "readonly",
+        HTMLInputElement: "readonly",
+        HTMLSelectElement: "readonly",
+        HTMLCanvasElement: "readonly",
+        HTMLButtonElement: "readonly",
+        Event: "readonly",
+        CustomEvent: "readonly",
+      },
+    },
+    rules: {
+      "no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+      "no-console": ["error", { allow: ["warn", "error"] }],
+    },
+  },
+];

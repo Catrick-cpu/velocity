@@ -44,6 +44,8 @@ Thumbs.db
 /pkg/
 /web-dist/
 /node_modules/
+/playwright-report/
+/test-results/
 
 # Screenshot/debug outputs
 /screenshots/

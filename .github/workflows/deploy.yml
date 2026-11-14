@@ -1,0 +1,80 @@
+name: Build and deploy VELOCITY
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install browser dependencies
+        run: npm ci
+
+      - name: Check dependency lockfile and advisories
+        run: |
+          npm audit --audit-level=high
+          cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check formatting and lint
+        run: |
+          npm run format:check
+          npm run lint
+
+      - name: Run unit tests
+        run: |
+          npm test
+          cargo test --locked --workspace
+
+      - name: Build static browser application
+        run: npm run build
+
+      - name: Verify Pages paths and assets
+        run: npm run check:build
+
+      - name: Install Chromium for browser tests
+        run: npx playwright install chromium
+
+      - name: Run production browser tests
+        run: npm run test:e2e
+        env:
+          CI: true
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
