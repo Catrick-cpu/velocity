@@ -448,7 +448,9 @@ fn environment(hour: f32, cloud: f32, view_distance: f32, wet: f32) -> Environme
     let fog_color = horizon * 0.92 + sun_color * 0.05;
     let night = (1.0 - day * 3.0).clamp(0.0, 1.0);
     let exposure = 1.05 + night * 2.4 - cloud * 0.08;
-    let fog_density = 1.58 / view_distance.max(120.0) * (1.0 + cloud * 0.35);
+    // Fog responds to view distance, clouds and wet/rainy atmosphere for a
+    // denser, more dramatic look without hiding the road in clear weather.
+    let fog_density = 1.52 / view_distance.max(120.0) * (1.0 + cloud * 0.45 + wet * 0.35);
     let _ = wet;
     Environment {
         sun_dir,
@@ -891,7 +893,8 @@ impl WorldRenderer {
             if built >= budget {
                 break;
             }
-            let res = if d < 300.0 { 24 } else { 12 };
+            let near = if self.quality.scale >= 0.95 { 360.0 } else { 300.0 };
+            let res = if d < near { 28 } else if d < near * 1.8 { 16 } else { 12 };
             let needs_build = match self.chunks.get(&(cx, cz)) {
                 Some(chunk) => chunk.res != res || chunk.version != self.dem_version,
                 None => true,
