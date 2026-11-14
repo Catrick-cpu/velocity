@@ -411,8 +411,8 @@ async function startWorldLoop() {
         if (output) output.textContent = String(fps);
       });
     }
-    state.world.setRoute(selectedRoute());
     state.world.setQuality(state.settings.quality);
+    state.world.setRoute(selectedRoute());
     updateRideControls();
   } catch (error) {
     if (token !== state.worldLoadToken) return;
@@ -431,7 +431,7 @@ function worldFrame(timestamp) {
     return;
   }
   const elapsed = state.previousFrame
-    ? Math.min((timestamp - state.previousFrame) / 1000, 0.08)
+    ? Math.min(Math.max((timestamp - state.previousFrame) / 1000, 0), 0.5)
     : 0;
   state.previousFrame = timestamp;
   if (state.ride.running) {
@@ -442,7 +442,10 @@ function worldFrame(timestamp) {
       Math.floor(progress * (route.points.length - 1)),
     );
     state.ride.grade = gradeAt(route.points, pointIndex);
-    state.ride = stepRide(state.ride, elapsed, state.ride.effort);
+    const steps = Math.max(1, Math.ceil(elapsed / 0.05));
+    for (let index = 0; index < steps; index += 1) {
+      state.ride = stepRide(state.ride, elapsed / steps, state.ride.effort);
+    }
     state.recordAccumulator += elapsed;
     if (state.recordAccumulator >= 1) {
       const currentIndex = Math.min(

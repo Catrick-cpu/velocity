@@ -3,7 +3,7 @@ import { Sky } from "three/addons/objects/Sky.js";
 import { routeLength } from "./model.js";
 
 const PRESETS = {
-  "Ultra Low": { pixelRatio: 0.65, trees: 140, shadows: false },
+  "Ultra Low": { pixelRatio: 0.5, trees: 140, shadows: false },
   Low: { pixelRatio: 0.8, trees: 260, shadows: false },
   Auto: { pixelRatio: 0.9, trees: 360, shadows: false },
   Medium: { pixelRatio: 1, trees: 520, shadows: true },
@@ -186,10 +186,11 @@ export class WorldRenderer {
   }
 
   render({ distanceM, lengthM, cameraMode, hour, cloud, rain, fog, quality }) {
-    const delta = Math.min(this.clock.getDelta(), 0.08);
+    const elapsed = this.clock.getDelta();
+    const delta = Math.min(elapsed, 0.08);
     this.elapsed += delta;
     this.frameCount += 1;
-    this.fpsTime += delta;
+    this.fpsTime += elapsed;
     this.setWeather(hour, cloud, rain, fog);
     if (quality !== this.requestedQuality) {
       this.requestedQuality = quality;
@@ -283,7 +284,7 @@ export class WorldRenderer {
     const maxZ = bounds.maxZ + margin;
     const divisions =
       {
-        "Ultra Low": 80,
+        "Ultra Low": 64,
         Low: 96,
         Auto: 112,
         Medium: 128,
@@ -302,7 +303,7 @@ export class WorldRenderer {
         vertices.push(worldX, height, worldZ);
         const color = terrainColor(height, worldX, worldZ);
         colors.push(color.r, color.g, color.b);
-        uvs.push((x / divisions) * 28, (z / divisions) * 28);
+        uvs.push((x / divisions) * 72, (z / divisions) * 72);
         if (x < divisions && z < divisions) {
           const a = z * (divisions + 1) + x;
           const b = a + divisions + 1;
@@ -446,13 +447,16 @@ export class WorldRenderer {
     const centerX = (bounds.minX + bounds.maxX) / 2;
     const centerZ = (bounds.minZ + bounds.maxZ) / 2;
     const peaks = 10;
-    const sides = 18;
+    const sides = 24;
     const levels = [
       [0, 1],
+      [0.07, 0.96],
       [0.12, 0.91],
       [0.28, 0.76],
+      [0.37, 0.67],
       [0.46, 0.59],
       [0.64, 0.42],
+      [0.71, 0.35],
       [0.79, 0.28],
       [0.91, 0.15],
       [0.98, 0.06],
@@ -480,9 +484,13 @@ export class WorldRenderer {
       for (const [elevation, radius] of levels) {
         for (let side = 0; side < sides; side += 1) {
           const angle = (side / sides) * Math.PI * 2;
-          const ridge = 0.84 + pseudoRandom(peak * 97 + side * 13 + 5) * 0.34;
+          const ridge = 0.68 + pseudoRandom(peak * 97 + side * 13 + 5) * 0.52;
           const radial = width * radius * ridge;
-          const y = base + height * elevation + Math.sin(angle * 3 + peak) * 16;
+          const y =
+            base +
+            height * elevation +
+            Math.sin(angle * 3 + peak) * 28 +
+            Math.sin(angle * 7 - peak * 2) * 11;
           vertices.push(
             center.x + Math.cos(angle) * radial,
             y,
@@ -523,7 +531,6 @@ export class WorldRenderer {
         geometry,
         new THREE.MeshStandardMaterial({
           vertexColors: true,
-          flatShading: true,
           roughness: 1,
         }),
       );
@@ -565,7 +572,7 @@ export class WorldRenderer {
       const next = samples[(sampleIndex + 1) % samples.length].position;
       const tangent = next.clone().sub(previous).normalize();
       const side = new THREE.Vector3(tangent.z, 0, -tangent.x);
-      const distance = 240 + pseudoRandom(index * 29 + 7) * 210;
+      const distance = 100 + pseudoRandom(index * 29 + 7) * 220;
       const sign = pseudoRandom(index * 23 + 13) > 0.5 ? 1 : -1;
       const x = sample.x + side.x * distance * sign;
       const z = sample.z + side.z * distance * sign;
@@ -718,16 +725,30 @@ function terrainHeight(x, z) {
 }
 
 function terrainColor(height, x, z) {
-  const tint = Math.sin(x * 0.005 + z * 0.003) * 0.025;
-  if (height > 420) return new THREE.Color("#e0e0d9").offsetHSL(0, 0, tint);
-  if (height > 300) return new THREE.Color("#8a8b7d").offsetHSL(0, 0, tint);
-  if (height > 190) return new THREE.Color("#73816a").offsetHSL(0, 0, tint);
-  if (height < 48) return new THREE.Color("#758466").offsetHSL(0, 0, tint);
-  return new THREE.Color("#64815b").offsetHSL(0, 0, tint);
+  const tint = Math.sin(x * 0.003 + z * 0.002) * 0.07;
+  const meadow = new THREE.Color("#668c5b");
+  const alpine = new THREE.Color("#7b876d");
+  const stone = new THREE.Color("#96978d");
+  const snow = new THREE.Color("#e4e6df");
+  let color = meadow.clone();
+  if (height > 400) {
+    color = stone
+      .clone()
+      .lerp(snow, THREE.MathUtils.smoothstep(height, 450, 560));
+  } else if (height > 260) {
+    color = alpine
+      .clone()
+      .lerp(stone, THREE.MathUtils.smoothstep(height, 280, 400));
+  } else if (height > 150) {
+    color = meadow
+      .clone()
+      .lerp(alpine, THREE.MathUtils.smoothstep(height, 160, 260));
+  }
+  return color.offsetHSL(0, 0, tint);
 }
 
 function createTerrainTexture() {
-  const size = 256;
+  const size = 512;
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {

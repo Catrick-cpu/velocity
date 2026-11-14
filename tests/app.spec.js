@@ -38,8 +38,12 @@ test("ride starts in a real WebGL2 scene and records a local simulated activity"
   });
   expect(hasWebGl).toBeTruthy();
   await page.getByRole("button", { name: "Start ride" }).click();
-  await page.waitForTimeout(1800);
-  await expect(page.locator("#distance")).not.toHaveText("0.00");
+  await expect(page.locator("#elapsed")).not.toHaveText("00:00:00", {
+    timeout: 25_000,
+  });
+  await expect(page.locator("#distance")).not.toHaveText("0.00", {
+    timeout: 25_000,
+  });
   await page.getByRole("button", { name: "Finish" }).click();
   await page
     .locator(".sidebar")
