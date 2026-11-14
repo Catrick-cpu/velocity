@@ -1,0 +1,23 @@
+[package]
+name = "velocity-sensors"
+description = "BLE sensor and smart trainer integration for VELOCITY"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+velocity-core = { path = "../velocity-core" }
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+thiserror.workspace = true
+btleplug = "0.13.5"
+# Linux has no dbus development headers installed here, and VELOCITY must never
+# require system-wide packages. The vendored feature compiles libdbus locally
+# with cc and links it statically.
+libdbus-sys = { version = "0.2", features = ["vendored"] }
+uuid = "1"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio-stream = "0.1.19"
+futures-util = "0.3.34"

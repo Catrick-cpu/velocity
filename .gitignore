@@ -1,0 +1,51 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# Local application data / exports / backups (never commit personal training data)
+/*.db
+/*.sqlite
+/*.sqlite3
+/*.fit
+/*.gpx
+/*.tcx
+/exports/
+/backups/
+/velocity-backup-*.db
+/dem-tiles/
+/**/dem-tiles/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs and temp
+*.log
+/tmp/
+
+# Secrets and credentials (defense in depth)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*credentials*
+*secret*
+*token*
+
+# Web/WASM build outputs (if added later)
+/dist/
+/pkg/
+/web-dist/
+/node_modules/
+
+# Screenshot/debug outputs
+/screenshots/
+/*.png
+!/assets/**/*.png

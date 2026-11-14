@@ -1,0 +1,29 @@
+[package]
+name = "velocity-app"
+description = "VELOCITY - premium open-source cycling platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "velocity"
+path = "src/main.rs"
+
+[dependencies]
+velocity-core = { path = "../velocity-core" }
+velocity-sensors = { path = "../velocity-sensors" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+log.workspace = true
+png = "0.18.1"
+directories = "6.0.0"
+toml = "1.2.1"
+env_logger = "0.11.11"
+ureq = { version = "3.5.2", features = ["rustls"] }
+rand = "0.10.3"
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "x11", "wayland"] }
+egui_plot = "0.38.0"
