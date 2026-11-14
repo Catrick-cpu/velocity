@@ -918,14 +918,21 @@ select:focus-visible {
   bottom: 83px;
   left: 16px;
   color: rgb(255 255 255 / 84%);
+  display: grid;
+  gap: 4px;
   font:
     700 7px Manrope,
     sans-serif;
   letter-spacing: 0.1em;
   text-shadow: 0 1px 4px #25372d;
 }
-.world-caption span {
-  padding: 0 3px;
+.world-attribution {
+  color: rgb(255 255 255 / 72%);
+  font-size: 6px;
+  letter-spacing: 0.04em;
+}
+.world-attribution a {
+  color: inherit;
 }
 .world-fallback {
   position: absolute;

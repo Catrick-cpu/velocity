@@ -23,18 +23,17 @@ point. Those Rust modules are not compiled into Pages.
 The static browser app is an independent implementation under `web/`:
 
 - Vanilla JavaScript and Three.js build a WebGL 2 scene when the rider opens the
-  Ride page. The terrain, road surface, trees, a few buildings, rider and camera
-  are generated locally; no graphics service, API key, server or map download
-  is required.
+  Ride page. Nearby SWISSIMAGE aerial tiles and regional elevation are loaded
+  on demand; mapped surface features appear in the imagery, not as 3D assets.
 - `web/model.js` contains track distance, simulation, import/export and activity
   helpers. GPX/TCX routes and JSON activity backups are stored on-device.
 - IndexedDB is the primary store; localStorage is used if IndexedDB is
   unavailable. The app does not upload data.
 - Hash navigation (`#/dashboard`, `#/ride`, `#/routes`, `#/activities`,
   `#/devices`, `#/settings`) works on static hosting and survives refreshes.
-- A service worker caches the app shell and same-origin assets after they have
-  been visited. Cached UI and local records are available offline; no offline
-  external map tiles are implied.
+- A service worker caches the app shell and same-origin assets. A separate
+  bounded Cache Storage cache retains up to 96 regional geodata tiles for
+  offline reuse; uncached regions use generated scenery when offline.
 - Web Bluetooth is feature-detected and requests permission only after a user
   action. Standard heart-rate and cycling-power notifications are read when
   exposed by the browser/device. FTMS resistance control and ANT+ are not
@@ -45,19 +44,36 @@ HTML asset references before the Pages artifact is uploaded.
 
 ## Data and rendering boundaries
 
-The browser demo routes are generated loops around named Swiss regions. They are
-not surveyed roads, navigation routes, a height model, or a geospatially accurate
-copy of Switzerland. A user-imported GPX/TCX route retains its coordinates and
-can be followed in the generated scene, but the browser does not fetch
-terrain/building/road datasets. Native elevation tiles use Mapzen Terrain Tiles
-from AWS Open Data (SRTM/Copernicus/GMTED), licensed CC BY 4.0; this browser
-build does not contact that source.
+Browser rides load five-by-five regional SWISSIMAGE aerial tiles from the
+official swisstopo WMTS and three-by-three Mapzen Terrarium elevation tiles
+from the public AWS Open Data bucket. The selected WMTS tile matrix is 2.5 m
+per pixel; the European elevation source is EU-DEM at roughly 25–30 m native
+resolution, not swissALTI3D. Both services support browser CORS and need no key.
+swisstopo's free-geodata terms permit reuse with attribution (`© swisstopo`);
+Mapzen's terrain-tile documentation requires attribution to Mapzen and its
+underlying sources, including Copernicus EU-DEM. See the [swisstopo terms](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices),
+[Mapzen attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)
+and [Mapzen data sources](https://github.com/tilezen/joerd/blob/master/docs/data-sources.md).
+
+The tile cache is capped at 96 entries and prunes the oldest cached requests.
+It prefers cached tiles for 30 days, then refreshes online and uses the prior
+copy if a network request fails. It never downloads Switzerland as a whole.
+Regional data is loaded around the rider and refreshed when they leave the
+loaded patch; unavailable or out-of-coverage areas retain generated scenery
+with an explicit status.
+
+The browser demo routes remain generated loops rather than surveyed roads.
+The loaded imagery and terrain are real, but roads, buildings and vegetation
+are only visible as pixels, not as vector or 3D features, and the 25–30 m
+EU-DEM cannot reproduce SwissALTI3D's sub-meter terrain or buildings. Imported
+GPX/TCX coordinates are preserved. Areas without loaded regional data use
+generated scenery. Native elevation support remains independent of the browser
+renderer.
 
 Static hosting has no server-side database, computation or upload endpoint.
-Large regional data packs are intentionally not bundled. If real 3D map data is
-added later, it needs independently hosted, chunked assets, documented license
-and attribution, CORS/cache validation, and an offline fallback before it can
-replace generated scenery.
+Large geodata packs are intentionally not bundled. GeoAdmin's public geoservice
+is best-effort and may limit excessive traffic; the app requests only nearby
+tiles with four concurrent requests and does not retry failed requests.
 
 ## Local development and checks
 

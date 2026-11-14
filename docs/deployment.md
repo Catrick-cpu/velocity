@@ -25,3 +25,12 @@ The application depends only on same-origin build assets and browser storage at
 startup. The system fonts are used without a remote font service. Web Bluetooth
 requires a secure context and a supporting browser; the app remains usable
 without it.
+
+The Ride page optionally requests nearby SWISSIMAGE tiles from swisstopo's
+public WMTS and Mapzen Terrarium elevation tiles from AWS Open Data. No token or
+paid API is required. The browser caches a limited number of successful map
+tiles and falls back to generated scenery if a source is unavailable. Reuse
+requires attribution: `© swisstopo`, plus Mapzen and the underlying terrain
+data sources; see [architecture](architecture.md) for source and license
+details. The elevation data is EU-DEM at roughly 25–30 m resolution, not
+swissALTI3D.

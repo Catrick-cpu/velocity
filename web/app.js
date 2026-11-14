@@ -167,10 +167,10 @@ function renderDashboard() {
     <section class="overview-grid">
       <article class="welcome-card">
         <div class="welcome-copy"><span class="eyebrow">READY WHEN YOU ARE</span><h2>Find your<br />next rhythm.</h2>
-        <p>Ride through a procedural Alpine world, record your effort and keep every activity on this device.</p>
+        <p>Explore real Swiss aerial imagery and regional elevation while keeping every activity on this device. Demo courses remain generated training routes, not mapped roads.</p>
         <button class="button button-dark" data-action="go-ride">Enter the world <span>→</span></button></div>
         <div class="mountain-art" aria-hidden="true"><div class="sun-disc"></div><div class="mountain mountain-back"></div><div class="mountain mountain-front"></div><div class="mountain mountain-low"></div></div>
-        <div class="welcome-note">GENERATED WORLD · NO MAP DATA REQUIRED</div>
+        <div class="welcome-note">REGIONAL MAP DATA · NETWORK OR CACHE</div>
       </article>
       <article class="quote-card"><span class="quote-mark">“</span><p>Consistency beats intensity. Show up, find your pace, and enjoy the ride.</p><span class="quote-caption">A NOTE FROM YOUR TRAINING SPACE</span></article>
     </section>
@@ -199,7 +199,7 @@ function renderDashboard() {
       </div>
       <p class="data-disclosure">Demo courses are generated for indoor training and are not mapped roads. Import a GPX track to ride your own route.</p>
     </section>
-    <footer class="page-footer"><span>Built for riders. Designed for privacy.</span><span>Swiss-inspired procedural scenery · <a href="#/settings">About this build</a></span></footer>
+    <footer class="page-footer"><span>Built for riders. Designed for privacy.</span><span>Real aerial tiles · regional DEM · <a href="#/settings">About this build</a></span></footer>
     <span class="sr-only" id="current-route">${escapeHtml(current.name)}</span>`;
 }
 
@@ -209,7 +209,7 @@ function renderRide() {
   const heartRateLabel = state.heartRateBpm == null ? "BPM" : "LIVE BPM";
   return `
     <section class="ride-header"><div><span class="eyebrow">VIRTUAL RIDE · ${powerLabel}</span><h1>${escapeHtml(route.name)}</h1>
-      <p>${escapeHtml(route.area)} <span class="subtle-separator">·</span> Generated training world, not a navigation map</p></div>
+      <p>${escapeHtml(route.area)} <span class="subtle-separator">·</span> Generated course · not for navigation</p></div>
       <label class="select-wrap"><span>COURSE</span><select id="ride-route">${state.routes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === route.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label>
     </section>
     <section class="ride-layout">
@@ -223,7 +223,7 @@ function renderRide() {
           <div class="hud-stats"><span><strong id="power">0</strong><small>${powerLabel}</small></span><span><strong id="cadence">0</strong><small>SIM RPM</small></span><span><strong id="heart-rate">--</strong><small>${heartRateLabel}</small></span></div>
           <div class="distance-readout"><strong id="distance">0.00</strong><span>KM</span><small id="elapsed">00:00:00</small></div>
         </div>
-        <div class="world-caption">PROCEDURAL ALPINE SCENERY <span>·</span> NOT GEOGRAPHICALLY ACCURATE</div>
+        <div class="world-caption"><span id="world-data-status" role="status" aria-live="polite">Swiss regional data loads on demand</span><span class="world-attribution">Aerial imagery <a href="https://www.swisstopo.admin.ch/en/home.html" target="_blank" rel="noopener noreferrer">© swisstopo</a> · Elevation <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener noreferrer">Mapzen / Copernicus EU-DEM</a></span></div>
       </div>
       <aside class="ride-side">
         <div class="ride-controls">
@@ -270,7 +270,7 @@ function renderRoutes() {
         )
         .join("")}</div>
     </section>
-    <div class="notice-card"><strong>Map and terrain data</strong><p>The 3D world uses locally generated scenery so it starts immediately, including offline. It does not contain real roads, terrain elevation or buildings. Imported GPS tracks keep their route geometry; native VELOCITY has optional Mapzen Terrarium elevation support. No third-party map service is contacted by this browser build.</p></div>`;
+    <div class="notice-card"><strong>Map and terrain data</strong><p>The ride scene fetches a nearby five-by-five patch of SWISSIMAGE aerial tiles and three-by-three Mapzen Terrarium elevation tiles (EU-DEM, roughly 25–30 m source resolution) from public CORS-enabled services. Tile servers receive the requested map region; GPS tracks and ride data are not sent. Tiles are cached locally with a bounded 96-tile cache and reused offline when available. Demo courses are generated and are not mapped roads. Roads, buildings and vegetation appear only as pixels in the aerial imagery; they are not 3D map features. SwissALTI3D and detailed building/road data are not included. Unavailable regions use generated scenery.</p></div>`;
 }
 
 function renderActivities() {
@@ -406,6 +406,10 @@ async function startWorldLoop() {
         const label = document.querySelector("#renderer-label");
         if (label) label.textContent = status;
       });
+      state.world.onRegionStatus = (status) => {
+        const label = document.querySelector("#world-data-status");
+        if (label) label.textContent = status;
+      };
       state.world.onFps((fps) => {
         const output = document.querySelector("#fps");
         if (output) output.textContent = String(fps);

@@ -28,10 +28,18 @@ test("ride starts in a real WebGL2 scene and records a local simulated activity"
   page,
 }) => {
   const errors = [];
+  await page.route(/wmts\.geo\.admin\.ch|elevation-tiles-prod/, (route) =>
+    route.abort(),
+  );
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("./#/ride");
   await expect(page.locator("#renderer-label")).toContainText(
     /WebGL 2|unavailable/,
+    { timeout: 15_000 },
+  );
+  await expect(page.locator("#world-data-status")).toContainText(
+    "procedural scenery fallback",
+    { timeout: 15_000 },
   );
   const hasWebGl = await page.locator("#world").evaluate((canvas) => {
     return Boolean(canvas.getContext("webgl2"));

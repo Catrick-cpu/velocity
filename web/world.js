@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { Sky } from "three/addons/objects/Sky.js";
 import { routeLength } from "./model.js";
+import {
+  blendRegionalTerrainHeight,
+  loadSwissRegion,
+  swissGrid,
+  swissImageRegionKey,
+} from "./swiss-data.js";
 
 const PRESETS = {
   "Ultra Low": { pixelRatio: 0.5, trees: 140, shadows: false },
@@ -73,6 +79,12 @@ export class WorldRenderer {
     this.routeCurve = null;
     this.routeSamples = [];
     this.route = null;
+    this.regionData = null;
+    this.regionLoadKey = null;
+    this.regionRequestToken = 0;
+    this.regionAbortController = null;
+    this.failedRegionKeys = new Set();
+    this.projectionOrigin = null;
     this.rider = createRider();
     this.scene.add(this.rider);
     this.preset = "Auto";
@@ -85,9 +97,29 @@ export class WorldRenderer {
   }
 
   setRoute(route) {
+    const projection = projectRoute(route.points);
+    const routeKey = `${route.id}:${projection.center.lat}:${projection.center.lon}`;
+    const routeChanged = routeKey !== this.routeKey;
     this.route = route;
+    this.routeKey = routeKey;
+    this.projectionOrigin = projection.center;
+    if (routeChanged) {
+      this.regionRequestToken += 1;
+      this.regionAbortController?.abort();
+      this.regionAbortController = null;
+      this.regionLoadKey = null;
+      this.failedRegionKeys.clear();
+      this.regionData?.texture?.dispose();
+      this.regionData = null;
+    }
+    this.buildWorld(route, projection.points);
+    if (routeChanged) {
+      this.requestSwissRegion(route.points[0]);
+    }
+  }
+
+  buildWorld(route, projected) {
     this.clearWorld();
-    const projected = projectRoute(route.points);
     const curvePoints = projected.map(
       (point) => new THREE.Vector3(point.x, 0, point.z),
     );
@@ -100,11 +132,102 @@ export class WorldRenderer {
       "centripetal",
       0.35,
     );
-    this.routeSamples = buildRouteSamples(this.routeCurve, route, closed);
+    this.routeSamples = buildRouteSamples(
+      this.routeCurve,
+      route,
+      closed,
+      (x, z) => this.heightAtWorld(x, z),
+    );
     this.buildTerrain(this.routeSamples, closed);
-    this.buildMountains(this.routeSamples);
-    this.buildRoad(this.routeSamples, closed);
-    this.buildVegetation();
+    if (this.regionData) {
+      this.buildSwissLandform(this.regionData);
+      this.buildSwissTerrain(this.regionData);
+    } else {
+      this.buildMountains(this.routeSamples);
+      this.buildRoad(this.routeSamples, closed);
+      this.buildVegetation();
+    }
+  }
+
+  async requestSwissRegion(center) {
+    const key = swissImageRegionKey(center.lat, center.lon);
+    if (key === this.regionData?.key || this.regionLoadKey === key) return;
+    if (this.failedRegionKeys.has(key)) return;
+
+    this.regionAbortController?.abort();
+    const controller = new globalThis.AbortController();
+    this.regionAbortController = controller;
+    const token = ++this.regionRequestToken;
+    this.regionLoadKey = key;
+    this.onRegionStatus?.("Loading Swiss aerial imagery and terrain…");
+    try {
+      const region = await loadSwissRegion({
+        center,
+        origin: this.projectionOrigin,
+        signal: controller.signal,
+        onProgress: (completed, total) => {
+          if (token === this.regionRequestToken) {
+            this.onRegionStatus?.(
+              `Loading Swiss regional data · ${completed}/${total} tiles`,
+            );
+          }
+        },
+      });
+      if (token !== this.regionRequestToken || !this.route) {
+        region.texture?.dispose();
+        return;
+      }
+      const previousRegion = this.regionData;
+      this.regionData = region;
+      this.regionLoadKey = null;
+      this.buildWorld(this.route, projectRoute(this.route.points).points);
+      previousRegion?.texture?.dispose();
+      this.onRegionStatus?.(
+        `SWISSIMAGE · EU-DEM ~30 m · ${region.cachedTileCount}/${region.tileCount} tiles cached`,
+      );
+    } catch (error) {
+      if (token !== this.regionRequestToken || controller.signal.aborted)
+        return;
+      this.regionLoadKey = null;
+      this.failedRegionKeys.add(key);
+      console.warn("Swiss regional data is unavailable:", error);
+      this.onRegionStatus?.(
+        this.regionData
+          ? "Regional data unavailable · previous region retained"
+          : "Swiss data unavailable · procedural scenery fallback",
+      );
+    }
+  }
+
+  heightAtWorld(x, z) {
+    const region = this.regionData;
+    const elevation = region?.heightAtWorld(x, z);
+    if (Number.isFinite(elevation)) {
+      return elevation - region.referenceElevation;
+    }
+    if (region) {
+      const bounds = region.terrainBounds;
+      const edgeX = THREE.MathUtils.clamp(
+        x,
+        bounds.minX + 20,
+        bounds.maxX - 20,
+      );
+      const edgeZ = THREE.MathUtils.clamp(
+        z,
+        bounds.minZ + 20,
+        bounds.maxZ - 20,
+      );
+      const edgeElevation = region.heightAtWorld(edgeX, edgeZ);
+      if (Number.isFinite(edgeElevation)) {
+        return blendRegionalTerrainHeight(
+          edgeElevation - region.referenceElevation,
+          terrainHeight(x, z) - 220,
+          Math.hypot(x - edgeX, z - edgeZ),
+          3500,
+        );
+      }
+    }
+    return terrainHeight(x, z) - (region ? 220 : 0);
   }
 
   setQuality(preset) {
@@ -200,6 +323,15 @@ export class WorldRenderer {
     if (this.routeSamples.length) {
       const progress = lengthM > 0 ? (distanceM % lengthM) / lengthM : 0;
       const riderState = pointAtProgress(this.routeSamples, progress);
+      if (
+        riderState.geo &&
+        !this.regionData?.containsWorld(
+          riderState.position.x,
+          riderState.position.z,
+        )
+      ) {
+        this.requestSwissRegion(riderState.geo);
+      }
       this.rider.position.copy(riderState.position);
       this.rider.rotation.y = Math.atan2(
         -riderState.tangent.z,
@@ -247,9 +379,12 @@ export class WorldRenderer {
   }
 
   dispose() {
+    this.regionRequestToken += 1;
+    this.regionAbortController?.abort();
     this.resizeObserver.disconnect();
     this.renderer.dispose();
     this.clearWorld();
+    this.regionData?.texture?.dispose();
     this.terrainTexture.dispose();
     this.roadTexture.dispose();
     this.sky.material.dispose();
@@ -299,12 +434,22 @@ export class WorldRenderer {
       for (let x = 0; x <= divisions; x += 1) {
         const worldX = minX + ((maxX - minX) * x) / divisions;
         const worldZ = minZ + ((maxZ - minZ) * z) / divisions;
-        const height = terrainHeight(worldX, worldZ);
+        const height = this.heightAtWorld(worldX, worldZ);
         vertices.push(worldX, height, worldZ);
         const color = terrainColor(height, worldX, worldZ);
         colors.push(color.r, color.g, color.b);
         uvs.push((x / divisions) * 72, (z / divisions) * 72);
         if (x < divisions && z < divisions) {
+          const nextWorldX = minX + ((maxX - minX) * (x + 1)) / divisions;
+          const nextWorldZ = minZ + ((maxZ - minZ) * (z + 1)) / divisions;
+          const regionBounds = this.regionData?.terrainBounds;
+          const coveredByRegionalTerrain =
+            regionBounds &&
+            worldX >= regionBounds.minX &&
+            nextWorldX <= regionBounds.maxX &&
+            worldZ >= regionBounds.minZ &&
+            nextWorldZ <= regionBounds.maxZ;
+          if (coveredByRegionalTerrain) continue;
           const a = z * (divisions + 1) + x;
           const b = a + divisions + 1;
           indices.push(a, b, a + 1, b, b + 1, a + 1);
@@ -332,7 +477,115 @@ export class WorldRenderer {
     terrain.castShadow = false;
     this.world.add(terrain);
 
-    if (closed && samples.length > 10) this.buildBuildings(samples, bounds);
+    if (!this.regionData && closed && samples.length > 10) {
+      this.buildBuildings(samples, bounds);
+    }
+  }
+
+  buildSwissLandform(region) {
+    const { minX, maxX, minZ, maxZ } = region.terrainBounds;
+    const divisions =
+      this.preset === "Ultra Low" || this.preset === "Low" ? 128 : 192;
+    const vertices = [];
+    const colors = [];
+    const uvs = [];
+    const indices = [];
+    for (let z = 0; z <= divisions; z += 1) {
+      const worldZ = minZ + ((maxZ - minZ) * z) / divisions;
+      for (let x = 0; x <= divisions; x += 1) {
+        const worldX = minX + ((maxX - minX) * x) / divisions;
+        const height = this.heightAtWorld(worldX, worldZ);
+        const color = terrainColor(height, worldX, worldZ);
+        vertices.push(worldX, height, worldZ);
+        colors.push(color.r, color.g, color.b);
+        uvs.push((x / divisions) * 32, (z / divisions) * 32);
+        if (x < divisions && z < divisions) {
+          const nextWorldX = minX + ((maxX - minX) * (x + 1)) / divisions;
+          const nextWorldZ = minZ + ((maxZ - minZ) * (z + 1)) / divisions;
+          const imageBounds = region.bounds;
+          const coveredByAerialTerrain =
+            worldX >= imageBounds.minX &&
+            nextWorldX <= imageBounds.maxX &&
+            worldZ >= imageBounds.minZ &&
+            nextWorldZ <= imageBounds.maxZ;
+          if (coveredByAerialTerrain) continue;
+          const a = z * (divisions + 1) + x;
+          const b = a + divisions + 1;
+          indices.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(vertices, 3),
+    );
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const terrain = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        map: this.terrainTexture,
+        vertexColors: true,
+        roughness: 0.96,
+      }),
+    );
+    terrain.receiveShadow = true;
+    terrain.castShadow = false;
+    this.world.add(terrain);
+  }
+
+  buildSwissTerrain(region) {
+    const { minX, maxX, minZ, maxZ } = region.bounds;
+    const divisions =
+      this.preset === "Ultra Low" || this.preset === "Low" ? 96 : 160;
+    const vertices = [];
+    const uvs = [];
+    const indices = [];
+    for (let z = 0; z <= divisions; z += 1) {
+      const worldZ = minZ + ((maxZ - minZ) * z) / divisions;
+      for (let x = 0; x <= divisions; x += 1) {
+        const worldX = minX + ((maxX - minX) * x) / divisions;
+        vertices.push(worldX, this.heightAtWorld(worldX, worldZ), worldZ);
+        uvs.push(x / divisions, 1 - z / divisions);
+        if (x < divisions && z < divisions) {
+          const a = z * (divisions + 1) + x;
+          const b = a + divisions + 1;
+          indices.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(vertices, 3),
+    );
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    let texture = region.texture;
+    if (!texture) {
+      texture = new THREE.CanvasTexture(region.textureCanvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      texture.generateMipmaps = true;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      region.texture = texture;
+    }
+    const terrain = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        map: texture,
+        roughness: 1,
+        metalness: 0,
+      }),
+    );
+    terrain.receiveShadow = true;
+    terrain.castShadow = false;
+    this.world.add(terrain);
   }
 
   buildRoad(samples, closed) {
@@ -476,7 +729,7 @@ export class WorldRenderer {
         0,
         centerZ + Math.sin(direction) * distance,
       );
-      const base = terrainHeight(center.x, center.z);
+      const base = this.heightAtWorld(center.x, center.z);
       const vertices = [];
       const colors = [];
       const indices = [];
@@ -576,7 +829,7 @@ export class WorldRenderer {
       const sign = pseudoRandom(index * 23 + 13) > 0.5 ? 1 : -1;
       const x = sample.x + side.x * distance * sign;
       const z = sample.z + side.z * distance * sign;
-      const height = terrainHeight(x, z);
+      const height = this.heightAtWorld(x, z);
       const size = 0.6 + pseudoRandom(index * 47 + 11) * 0.8;
       const canopies = [
         { scale: 1, height: 5.2 },
@@ -625,9 +878,9 @@ export class WorldRenderer {
         bounds.minZ +
         pseudoRandom(index * 23 + 31) * (bounds.maxZ - bounds.minZ);
       if (nearestRouteDistance(x, z, samples) < 38) {
-        dummy.position.set(x + 40, terrainHeight(x + 40, z) + 4.5, z);
+        dummy.position.set(x + 40, this.heightAtWorld(x + 40, z) + 4.5, z);
       } else {
-        dummy.position.set(x, terrainHeight(x, z) + 4.5, z);
+        dummy.position.set(x, this.heightAtWorld(x, z) + 4.5, z);
       }
       dummy.rotation.y = pseudoRandom(index * 37) * Math.PI * 2;
       dummy.updateMatrix();
@@ -661,25 +914,21 @@ function projectRoute(points) {
     points.reduce((sum, point) => sum + point.lat, 0) / points.length;
   const centerLon =
     points.reduce((sum, point) => sum + point.lon, 0) / points.length;
-  const cosLat = Math.cos((centerLat * Math.PI) / 180);
-  const projected = points.map((point) => ({
-    x: (point.lon - centerLon) * 111_320 * cosLat,
-    z: -(point.lat - centerLat) * 110_540,
-    ele: point.ele,
-  }));
-  const maxRange = Math.max(
-    ...projected.map((point) => Math.hypot(point.x, point.z)),
-    1,
-  );
-  const scale = Math.min(1, 1250 / maxRange);
-  return projected.map((point) => ({
-    ...point,
-    x: point.x * scale,
-    z: point.z * scale,
-  }));
+  const origin = swissGrid(centerLat, centerLon);
+  return {
+    center: { lat: centerLat, lon: centerLon },
+    points: points.map((point) => {
+      const grid = swissGrid(point.lat, point.lon);
+      return {
+        x: grid.easting - origin.easting,
+        z: origin.northing - grid.northing,
+        ele: point.ele,
+      };
+    }),
+  };
 }
 
-function buildRouteSamples(curve, route, closed) {
+function buildRouteSamples(curve, route, closed, heightAt) {
   const count = Math.min(480, Math.max(120, route.points.length * 3));
   const positions = curve.getPoints(count);
   const referenceLength = routeLength(route.points) || route.lengthM || 1;
@@ -687,10 +936,19 @@ function buildRouteSamples(curve, route, closed) {
     .slice(0, closed ? count : count + 1)
     .map((position, index) => {
       const t = index / count;
-      const terrain = terrainHeight(position.x, position.z);
+      const terrain = heightAt(position.x, position.z);
+      const scaled = t * (route.points.length - 1);
+      const geoStart = route.points[Math.floor(scaled)];
+      const geoEnd =
+        route.points[Math.min(route.points.length - 1, Math.ceil(scaled))];
+      const geoMix = scaled - Math.floor(scaled);
       return {
         position: new THREE.Vector3(position.x, terrain, position.z),
         distanceM: t * referenceLength,
+        geo: {
+          lat: geoStart.lat + (geoEnd.lat - geoStart.lat) * geoMix,
+          lon: geoStart.lon + (geoEnd.lon - geoStart.lon) * geoMix,
+        },
       };
     });
 }
@@ -704,7 +962,22 @@ function pointAtProgress(samples, progress) {
     .clone()
     .lerp(next.position, scaled - Math.floor(scaled));
   const tangent = next.position.clone().sub(current.position).normalize();
-  return { position, tangent };
+  const geo =
+    current.geo && next.geo
+      ? {
+          lat: THREE.MathUtils.lerp(
+            current.geo.lat,
+            next.geo.lat,
+            scaled - Math.floor(scaled),
+          ),
+          lon: THREE.MathUtils.lerp(
+            current.geo.lon,
+            next.geo.lon,
+            scaled - Math.floor(scaled),
+          ),
+        }
+      : null;
+  return { position, tangent, geo };
 }
 
 function terrainHeight(x, z) {
