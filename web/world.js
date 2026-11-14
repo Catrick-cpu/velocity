@@ -193,11 +193,13 @@ export class WorldRenderer {
       this.regionLoadKey = null;
       this.buildWorld(this.route, projectRoute(this.route.points).points);
       disposeRegionTextures(previousRegion);
-      const imagery = region.imageLayers.some((layer) => layer.matrix === 27)
-        ? "SWISSIMAGE 25 cm + 1 m + 2.5 m"
-        : region.imageLayers.some((layer) => layer.matrix === 25)
-          ? "SWISSIMAGE 1 m + 2.5 m"
-          : "SWISSIMAGE 2.5 m";
+      const imagery = region.imageLayers.some((layer) => layer.matrix === 28)
+        ? "SWISSIMAGE 10 cm + 1 m + 2.5 m"
+        : region.imageLayers.some((layer) => layer.matrix === 27)
+          ? "SWISSIMAGE 25 cm + 1 m + 2.5 m"
+          : region.imageLayers.some((layer) => layer.matrix === 25)
+            ? "SWISSIMAGE 1 m + 2.5 m"
+            : "SWISSIMAGE 2.5 m";
       this.onRegionStatus?.(
         `${imagery} · ${region.renderedBuildingCount ?? 0} 3D buildings · EU-DEM ~30 m · ${region.cachedTileCount}/${region.tileCount} tiles cached`,
       );

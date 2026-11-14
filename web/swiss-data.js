@@ -28,7 +28,8 @@ const IMAGE_TILE_RADIUS = 2;
 const IMAGE_TILE_MATRIX = 22;
 const DETAIL_TILE_RADIUS = 1;
 const DETAIL_TILE_MATRIX = 25;
-const ULTRA_DETAIL_TILE_MATRIX = 27;
+const ULTRA_DETAIL_TILE_RADIUS = 2;
+const ULTRA_DETAIL_TILE_MATRIX = 28;
 const HILLSHADE_TILE_MATRIX = 25;
 const VECTOR_TILE_ZOOM = 14;
 const VECTOR_TILE_RADIUS = 1;
@@ -164,7 +165,7 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
   const ultraDetailTiles = tilesAround(
     ultraDetailCenter.col,
     ultraDetailCenter.row,
-    DETAIL_TILE_RADIUS,
+    ULTRA_DETAIL_TILE_RADIUS,
   );
   const hillshadeTiles = tilesAround(
     hillshadeCenter.col,
@@ -322,8 +323,9 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
     const loadedUltraTiles = loadedTiles.filter(
       (tile) => tile.kind === "ultra",
     );
+    const ultraLayerTileCount = (ULTRA_DETAIL_TILE_RADIUS * 2 + 1) ** 2;
     const completeUltraTiles =
-      !optionalErrors.ultra && loadedUltraTiles.length === layerTileCount;
+      !optionalErrors.ultra && loadedUltraTiles.length === ultraLayerTileCount;
     if (completeUltraTiles) {
       imageLayers.push(
         createImageLayer(
@@ -331,7 +333,7 @@ export async function loadSwissRegion({ center, origin, signal, onProgress }) {
           ultraDetailCenter,
           originGrid,
           ULTRA_DETAIL_TILE_MATRIX,
-          DETAIL_TILE_RADIUS,
+          ULTRA_DETAIL_TILE_RADIUS,
         ),
       );
     } else {
@@ -484,7 +486,7 @@ function createImageLayer(tiles, center, origin, matrix, radius) {
     matrix,
     lift:
       matrix === ULTRA_DETAIL_TILE_MATRIX
-        ? 0.24
+        ? 0.36
         : matrix > IMAGE_TILE_MATRIX
           ? 0.12
           : 0,

@@ -45,13 +45,21 @@ HTML asset references before the Pages artifact is uploaded.
 ## Data and rendering boundaries
 
 Browser rides load a five-by-five 2.5 m/pixel SWISSIMAGE base patch, a
-three-by-three 1 m/pixel detail layer and a three-by-three 0.25 m/pixel
-close-range overlay from the official swisstopo WMTS. A nearby three-by-three
-SwissALTI3D multidirectional hillshade patch is blended lightly into the detail
-imagery; the actual elevation mesh still uses three-by-three Mapzen Terrarium
-tiles from the public AWS Open Data bucket, based on EU-DEM at roughly 25–30 m
-native resolution. The hillshade adds surface relief but is not a replacement
-for high-resolution elevation data.
+three-by-three 1 m/pixel detail layer and a five-by-five 0.1 m/pixel
+close-range overlay (about 128 m across) from the official swisstopo WMTS.
+The 10 cm imagery is optional and falls back to the lower-resolution layers
+where unavailable. A nearby three-by-three SwissALTI3D multidirectional
+hillshade patch is blended lightly into the detail imagery; the actual
+elevation mesh still uses three-by-three Mapzen Terrarium tiles from the public
+AWS Open Data bucket, based on EU-DEM at roughly 25–30 m native resolution.
+The hillshade adds surface relief but is not a replacement for high-resolution
+elevation data.
+
+SWISSIMAGE is aerial survey photography, not live street-level video or
+Street-View imagery. No free continuous street-level source is bundled; Google
+Street View and Apple Look Around are proprietary services. The browser
+renderer therefore cannot provide a live 1:1 ground-level replica from these
+open data sources.
 
 The scene also requests nearby zoom-14 building vector tiles from OpenFreeMap's
 public OpenMapTiles service. Building outlines and approximate render heights
